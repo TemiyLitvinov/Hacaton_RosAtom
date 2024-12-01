@@ -1,0 +1,99 @@
+```
+```
+import os 
+import cv2  # Для обработки изображений 
+import tensorflow as tf 
+from tensorflow import keras 
+from tensorflow.keras import layers 
+from tensorflow.keras.preprocessing.image import ImageDataGenerator 
+import numpy as np 
+ 
+# Указываем путь к каталогу с изображениями для train и val 
+train_folder = "data/train"  # Папка с данными для обучения 
+val_folder = "data/val"  # Папка с данными для валидации 
+ 
+# Список всех сторон машины 
+sides = ['front', 'rear', 'right', 'left'] 
+ 
+# Словарь для хранения путей к изображениям и их меток 
+train_image_paths = [] 
+train_labels = [] 
+val_image_paths = [] 
+val_labels = [] 
+ 
+# Функция для сбора данных из папок (train и val) 
+def collect_images_from_folder(image_folder, image_paths, labels): 
+    for side in sides: 
+        side_folder = os.path.join(image_folder, side) 
+        for filename in os.listdir(side_folder): 
+            if filename.endswith(('.jpg', '.png')):  # проверяем расширение файла 
+                image_path = os.path.join(side_folder, filename) 
+                image_paths.append(image_path) 
+                labels.append(side)  # метка соответствует названию папки (стороне машины) 
+ 
+# Собираем данные для обучения и валидации 
+collect_images_from_folder(train_folder, train_image_paths, train_labels) 
+collect_images_from_folder(val_folder, val_image_paths, val_labels) 
+ 
+# Преобразуем метки в числовые значения 
+label_dict = {label: idx for idx, label in enumerate(sides)} 
+train_labels = [label_dict[label] for label in train_labels] 
+val_labels = [label_dict[label] for label in val_labels] 
+ 
+# Функция для предобработки изображений 
+def preprocess_image(image_path): 
+    img = tf.keras.preprocessing.image.load_img(image_path, target_size=(128, 128))  # Уменьшаем размер до 128x128 
+    img_array = tf.keras.preprocessing.image.img_to_array(img)  # Преобразуем в массив 
+    img_array = img_array / 255.0  # Нормализуем 
+    return img_array 
+ 
+# Функция для создания TensorFlow Dataset 
+def create_dataset(image_paths, labels, batch_size=32): 
+    images = [preprocess_image(path) for path in image_paths] 
+    labels = np.array(labels) 
+     
+    # Преобразуем данные в tf.data.Dataset 
+    dataset = tf.data.Dataset.from_tensor_slices((images, labels)) 
+    dataset = dataset.batch(batch_size)  # Пакуем в батчи 
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)  # Используем предвыборку данных для ускорения 
+     
+    return dataset 
+ 
+# Создаем датасеты для обучения и валидации 
+train_dataset = create_dataset(train_image_paths, train_labels, batch_size=32) 
+val_dataset = create_dataset(val_image_paths, val_labels, batch_size=32) 
+ 
+# Строим модель нейросети с регуляризацией и уменьшением слоев 
+model = keras.Sequential([ 
+    layers.InputLayer(input_shape=(128, 128, 3)),  # Размер изображений уменьшен до 128x128 
+    layers.Conv2D(16, (3, 3), activation='relu', padding='same'),  # Уменьшено количество фильтров 
+    layers.MaxPooling2D((2, 2)), 
+    layers.Conv2D(32, (3, 3), activation='relu', padding='same'), 
+    layers.MaxPooling2D((2, 2)), 
+    layers.Flatten(), 
+    layers.Dense(64, activation='relu'), 
+    layers.Dropout(0.5),  # Добавляем Dropout для регуляризации 
+    layers.Dense(len(sides), activation='softmax')  # Количество выходных нейронов равно количеству сторон машины 
+]) 
+ 
+# Компилируем модель 
+optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # Можно уменьшить learning rate 
+model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy']) 
+ 
+# Обучаем модель с использованием генератора 
+history = model.fit( 
+    train_dataset,  # Обучение с аугментацией 
+    epochs=500, 
+    validation_data=val_dataset,  # Генератор для валидации 
+) 
+ 
+# Оценка модели на валидационной выборке 
+val_loss, val_acc = model.evaluate(val_dataset) 
+print(f"Точность на валидации: {val_acc}") 
+ 
+# Выводим среднюю точность и потерю по всем эпохам 
+val_accuracy = history.history['val_accuracy'] 
+val_loss_history = history.history['val_loss'] 
+ 
+mean_val_accuracy = np.mean(val_accuracy) 
+mean_val_loss =
